@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+
+# ML artifacts (optional — remove lines if you want these tracked)
+*.pkl
+*.h5
+*.pt
+*.pth
+*.ckpt
