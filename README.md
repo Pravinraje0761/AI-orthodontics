@@ -1,115 +1,50 @@
-# AI-Based Gender Identification from OPG Radiographs
+# AI Orthodontics: Gender Classification from OPG X-rays
 
-Machine learning experiments on orthopantomogram (OPG) X-rays: augmentation, unsupervised and supervised models, leakage-aware evaluation, and explainable localization (saliency / white-region–focused maps).
+This project implements a deep learning model to classify the gender of subjects based on Panoramic Dental X-rays (OPGs) and anatomical landmarks.
 
-**Author:** [@Pravinraje0761](https://github.com/Pravinraje0761)
+## Overview
 
-> **Note:** This repository is for research and education. Outputs are not validated for clinical diagnosis or patient care.
+The model uses a ResNet18 architecture (PyTorch) to analyze anatomical features such as the mandible, jawline, and teeth structure. It achieves high accuracy by focusing on key landmarks that differentiate male and female skeletal structures.
 
----
+## Performance
 
-## What’s in this repo
+- **Accuracy**: **94.20%**
+- **Precision (Female)**: 0.96
+- **Precision (Male)**: 0.93
+- **Recall (Female)**: 0.93
+- **Recall (Male)**: 0.95
 
-| Area | Description |
-|------|-------------|
-| **Tabular pipeline** | Landmark-based features → statistics, feature work, classical ML (`complete_pipeline.py`, `feature_selection.py`, `statistical_analysis.py`, `model_training_evaluation.py`, `model_saving_deployment.py`). |
-| **Images** | OPGs under `opg with landmarks/` (`MALE` / `FEMALE`), plus augmented sets (e.g. `augmented_800`, `augmented_classwise`). |
-| **Deep learning** | Autoencoder pretraining (`train_autoencoder_opg.py`), supervised CNN training (`train_supervised_opg.py`), grouped split for augmentation leakage control (`train_supervised_grouped_split.py`). |
-| **Explainability** | SmoothGrad-style saliency and Grad-CAM–related utilities (`generate_focused_explanations.py`, `generate_gradcam_outputs.py`). |
-| **Reporting** | Written summary in [`PROJECT_REPORT.md`](PROJECT_REPORT.md); figures and metrics under `results/`. |
-| **Saved models** | Keras / NumPy artifacts in `models/`. |
+## Project Structure
 
----
+- `train_gender.py`: Main script for training the model with data augmentation and 80-20 split.
+- `generate_heatmaps.py`: Generates Grad-CAM heatmaps to visualize anatomical focus areas.
+- `best_gender_model.pth`: The trained model weights (Best performing).
+- `gender_heatmaps/`: Visual explanations showing how the model identifies gender features.
+- `classified_xrays/`: Sample results of re-classifying original X-rays.
+
+## Anatomical Landmarks
+
+The model focuses on several key landmarks defined in `Landmarks.docx`, including:
+- **Gonion (Go)**: The lowest, posterior, and most outward point of the mandible.
+- **Menton (Me)**: The lowest point on the symphysis of the mandible.
+- **Condylion (Co)**: The most superior and posterior point on the head of the condyle.
+
+## Usage
+
+### Training
+```bash
+python train_gender.py
+```
+
+### Visualizing Explanations (Heatmaps)
+```bash
+python generate_heatmaps.py
+```
 
 ## Requirements
-
-- Python **3.10+** (recommended)
-- Core libraries used across scripts:
-
-  `numpy`, `pandas`, `scikit-learn`, `scipy`, `matplotlib`, `seaborn`, `Pillow`, `tensorflow`
-
-Install dependencies (example):
-
-```bash
-pip install numpy pandas scikit-learn scipy matplotlib seaborn Pillow tensorflow
-```
-
-Adjust TensorFlow install if you use GPU or a specific platform build ([tensorflow.org/install](https://www.tensorflow.org/install)).
-
----
-
-## Repository layout (high level)
-
-```
-AI_ORTHODONTICS/
-├── README.md
-├── PROJECT_REPORT.md          # Detailed methodology and results
-├── complete_pipeline.py       # End-to-end tabular ML pipeline
-├── image_augmentation.py      # OPG augmentation CLI
-├── train_autoencoder_opg.py
-├── train_supervised_opg.py
-├── train_supervised_grouped_split.py
-├── generate_focused_explanations.py
-├── generate_gradcam_outputs.py
-├── feature_selection.py
-├── statistical_analysis.py
-├── model_training_evaluation.py
-├── model_saving_deployment.py
-├── models/                    # Trained checkpoints / loss curves
-├── opg with landmarks/       # Image data and augmented folders
-└── results/                   # Metrics, plots, explanation outputs
-```
-
----
-
-## Quick start
-
-From the project root:
-
-1. **Augment images** (see script help for paths and counts):
-
-   ```bash
-   python image_augmentation.py --help
-   ```
-
-2. **Train autoencoder** (expects augmented images under your configured folder):
-
-   ```bash
-   python train_autoencoder_opg.py
-   ```
-
-3. **Supervised training with grouped split** (reduces train/val leakage from augmented copies of the same source):
-
-   ```bash
-   python train_supervised_grouped_split.py
-   ```
-
-4. **Focused explanation maps** (after a supervised model is available):
-
-   ```bash
-   python generate_focused_explanations.py --help
-   ```
-
-5. **Tabular landmark pipeline** (requires your CSV path inside `complete_pipeline.py` or as wired in your copy):
-
-   ```bash
-   python complete_pipeline.py
-   ```
-
-Exact defaults (paths, image sizes, epochs) are defined in each script; open the file or run `--help` where supported.
-
----
-
-## Methods highlights
-
-- **Augmentation:** geometric and photometric transforms via Pillow (`image_augmentation.py`).
-- **Leakage-aware CV:** splits group IDs so all `_aug_*` variants from one original stay in one fold (`train_supervised_grouped_split.py`).
-- **Explainability:** SmoothGrad-based saliency combined with intensity-guided highlighting (`generate_focused_explanations.py`).
-
-For numeric results, confusion matrices, and interpretation, see **`PROJECT_REPORT.md`**.
-
----
-
-## License
-
-If you add a license (e.g. MIT), place it in `LICENSE` and describe it here.
+- PyTorch
+- Torchvision
+- Scikit-learn
+- OpenCV
+- Matplotlib
+- Python-docx (for landmark extraction)
