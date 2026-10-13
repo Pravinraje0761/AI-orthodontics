@@ -13,9 +13,9 @@ def log(message):
 
 # Parameters
 IMG_SIZE = 224
-MODEL_PATH = 'best_gender_model.pth'
-CLASSIFIED_DIR = r'C:\Users\pravi\OneDrive\Desktop\AI_ORTHODONTICS\classified_xrays'
-OUTPUT_DIR = r'C:\Users\pravi\OneDrive\Desktop\AI_ORTHODONTICS\new_heatmaps_classified'
+MODEL_PATH = os.environ.get("OPG_MODEL_PATH", "outputs/best_gender_model.pth")
+CLASSIFIED_DIR = os.environ.get("OPG_CLASSIFIED_DIR", "data/classified_xrays")
+OUTPUT_DIR = os.environ.get("OPG_OUTPUT_DIR", "outputs/new_heatmaps_classified")
 
 # Grad-CAM Class
 class GradCAM:

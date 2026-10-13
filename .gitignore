@@ -27,3 +27,9 @@ Thumbs.db
 *.pt
 *.pth
 *.ckpt
+
+# Patient images and outputs are not tracked (see data/README.md)
+data/*
+!data/README.md
+outputs/
+.pytest_cache/
