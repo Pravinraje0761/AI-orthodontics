@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU PyTorch and dependencies
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          grep -v '^opencv-python' requirements.txt > /tmp/req.txt
+          pip install -r /tmp/req.txt opencv-python-headless
+      - name: Scripts compile
+        run: python -m compileall -q .
+      - name: Tests (split integrity + end-to-end training smoke test, no downloads)
+        run: python -m pytest

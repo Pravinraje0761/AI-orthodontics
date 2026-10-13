@@ -11,8 +11,8 @@ from PIL import Image
 
 # Parameters
 IMG_SIZE = 224
-DATA_DIR = r'c:\Users\pravi\OneDrive\Desktop\AI_ORTHODONTICS\OPG With landmarks-20260514T070507Z-3-001\OPG With landmarks'
-MODEL_PATH = 'best_gender_model.pth' # Or final_gender_model.pth
+DATA_DIR = os.environ.get("OPG_DATA_DIR", "data/OPG With landmarks")
+MODEL_PATH = os.environ.get("OPG_MODEL_PATH", "outputs/best_gender_model.pth")
 
 # Grad-CAM Class
 class GradCAM:

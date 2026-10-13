@@ -1,165 +1,151 @@
-import os
+"""Train the ResNet18 sex classifier on panoramic dental X-rays (OPGs).
+
+Evaluation is leak-free: train, validation and test are split by *source X-ray*
+(see splits.py), the checkpoint is chosen on validation, and the test set is scored
+once at the end. The headline test metrics use original X-rays only; augmented copies
+of a test X-ray are not independent samples and are reported separately.
+
+    python train_gender.py --data-dir "data/OPG With landmarks" --epochs 3
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.metrics import accuracy_score, classification_report
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets, models, transforms
-from torch.utils.data import DataLoader, Subset
-from sklearn.model_selection import train_test_split
-import numpy as np
-import sys
 
-# Ensure output is flushed immediately
-def log(message):
-    print(message, flush=True)
+from splits import grouped_split, original_id
 
-log("--- Starting Training Process ---")
-
-# Parameters
 IMG_SIZE = 224
-BATCH_SIZE = 8
-EPOCHS = 3 # Reduced for safety and speed
-DATA_DIR = r'c:\Users\pravi\OneDrive\Desktop\AI_ORTHODONTICS\OPG With landmarks-20260514T070507Z-3-001\OPG With landmarks'
+MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 
-# 1. Data Augmentation to prevent "memorizing" (overfitting)
 train_transform = transforms.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomRotation(15),
     transforms.ColorJitter(brightness=0.2, contrast=0.2),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    transforms.Normalize(MEAN, STD),
 ])
-
-test_transform = transforms.Compose([
+eval_transform = transforms.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    transforms.Normalize(MEAN, STD),
 ])
 
-def train_model():
-    if not os.path.exists(DATA_DIR):
-        log(f"Error: Data directory not found at {DATA_DIR}")
-        return
 
-    # Load full dataset first without transform to split indices
-    full_dataset = datasets.ImageFolder(DATA_DIR)
-    targets = full_dataset.targets
-    classes = full_dataset.classes
-    log(f"Total images found: {len(full_dataset)}")
-    log(f"Classes: {classes}")
+class Transformed(Dataset):
+    def __init__(self, subset: Subset, transform):
+        self.subset, self.transform = subset, transform
 
-    # 2. 80-20 Split
-    train_idx, test_idx = train_test_split(
-        np.arange(len(targets)), 
-        test_size=0.20, 
-        random_state=42, 
-        stratify=targets
-    )
-    
-    # Create subsets with appropriate transforms
-    class TransformedSubset(torch.utils.data.Dataset):
-        def __init__(self, subset, transform=None):
-            self.subset = subset
-            self.transform = transform
-            
-        def __getitem__(self, index):
-            x, y = self.subset[index]
-            if self.transform:
-                x = self.transform(x)
-            return x, y
-            
-        def __len__(self):
-            return len(self.subset)
+    def __getitem__(self, i):
+        x, y = self.subset[i]
+        return self.transform(x), y
 
-    train_subset = Subset(full_dataset, train_idx)
-    test_subset = Subset(full_dataset, test_idx)
-    
-    train_data = TransformedSubset(train_subset, train_transform)
-    test_data = TransformedSubset(test_subset, test_transform)
+    def __len__(self):
+        return len(self.subset)
 
-    train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
 
-    log(f"Training samples: {len(train_data)}")
-    log(f"Testing samples: {len(test_data)}")
+def build_model(pretrained: bool = True) -> nn.Module:
+    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
+    model.fc = nn.Sequential(nn.Dropout(0.5), nn.Linear(model.fc.in_features, 2))
+    return model
 
-    # 3. Model Implementation (ResNet18 with Dropout to prevent overfitting)
-    log("Initializing ResNet18...")
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-    
-    # Modify final layer and add Dropout
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Sequential(
-        nn.Dropout(0.5), # High dropout to prevent memorizing
-        nn.Linear(num_ftrs, 2)
-    )
-    
+
+@torch.no_grad()
+def predict(model, loader, device) -> np.ndarray:
+    model.eval()
+    out = []
+    for x, _ in loader:
+        out.append(model(x.to(device)).argmax(1).cpu().numpy())
+    return np.concatenate(out) if out else np.array([], dtype=int)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--data-dir", default="data/OPG With landmarks",
+                    help="ImageFolder root with one sub-folder per class (female/, male/)")
+    ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--batch-size", type=int, default=8)
+    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--out-dir", default="outputs")
+    ap.add_argument("--weights", choices=["imagenet", "none"], default="imagenet",
+                    help="'none' skips the ImageNet download (smoke tests only)")
+    args = ap.parse_args()
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    full = datasets.ImageFolder(args.data_dir)
+    paths = [p for p, _ in full.samples]
+    labels = np.array(full.targets)
+    train_idx, val_idx, test_idx, groups = grouped_split(paths, labels, seed=args.seed)
+    for name, ix in [("train", train_idx), ("val", val_idx), ("test", test_idx)]:
+        print(f"{name:5s}: {len(ix):4d} images from {len(set(groups[ix])):3d} source X-rays")
+
+    loaders = {
+        "train": DataLoader(Transformed(Subset(full, train_idx), train_transform),
+                            batch_size=args.batch_size, shuffle=True),
+        "val": DataLoader(Transformed(Subset(full, val_idx), eval_transform), batch_size=args.batch_size),
+        "test": DataLoader(Transformed(Subset(full, test_idx), eval_transform), batch_size=args.batch_size),
+    }
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log(f"Using device: {device}")
-    model = model.to(device)
-
+    model = build_model(pretrained=args.weights == "imagenet").to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.0001) # Lower learning rate for fine-tuning
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # 4. Training Loop
-    log("Starting training...")
-    best_acc = 0.0
-    
-    for epoch in range(EPOCHS):
+    best_val, ckpt = -1.0, out / "best_gender_model.pth"
+    for epoch in range(1, args.epochs + 1):
         model.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        
-        for i, (inputs, labels) in enumerate(train_loader):
-            inputs, labels = inputs.to(device), labels.to(device)
-            
+        total_loss = 0.0
+        for x, y in loaders["train"]:
+            x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
+            loss = criterion(model(x), y)
             loss.backward()
             optimizer.step()
-            
-            running_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-            
-            log(f"  Batch {i+1}/{len(train_loader)} - Loss: {loss.item():.4f}")
+            total_loss += loss.item()
+        val_acc = accuracy_score(labels[val_idx], predict(model, loaders["val"], device))
+        print(f"epoch {epoch}: train loss {total_loss / len(loaders['train']):.4f}, val acc {val_acc:.4f}")
+        if val_acc > best_val:  # checkpoint chosen on validation, never on test
+            best_val = val_acc
+            torch.save(model.state_dict(), ckpt)
 
-        epoch_acc = 100. * correct / total
-        log(f"--- Epoch {epoch+1} Summary: Loss {running_loss/len(train_loader):.4f}, Acc {epoch_acc:.2f}% ---")
+    model.load_state_dict(torch.load(ckpt, map_location=device))
+    y_pred = predict(model, loaders["test"], device)
+    y_true = labels[test_idx]
+    is_original = np.array([original_id(paths[i]) == Path(paths[i]).stem for i in test_idx])
 
-        # Validation at end of each epoch
-        model.eval()
-        test_correct = 0
-        test_total = 0
-        with torch.no_grad():
-            for inputs, labels in test_loader:
-                inputs, labels = inputs.to(device), labels.to(device)
-                outputs = model(inputs)
-                _, predicted = outputs.max(1)
-                test_total += labels.size(0)
-                test_correct += predicted.eq(labels).sum().item()
-        
-        test_acc = 100. * test_correct / test_total
-        log(f"--- Validation Accuracy: {test_acc:.2f}% ---")
-        
-        if test_acc > best_acc:
-            best_acc = test_acc
-            torch.save(model.state_dict(), 'best_gender_model.pth')
-            log("  Model saved (Best so far)")
+    metrics = {
+        "split": "grouped by source X-ray; checkpoint selected on validation",
+        "n_test_source_xrays": int(len(set(groups[test_idx]))),
+        "test_originals_only": {
+            "n": int(is_original.sum()),
+            "accuracy": float(accuracy_score(y_true[is_original], y_pred[is_original])),
+            "report": classification_report(y_true[is_original], y_pred[is_original],
+                                            target_names=full.classes, output_dict=True, zero_division=0),
+        },
+        "test_all_images_incl_augmented_copies": {
+            "n": int(len(test_idx)),
+            "accuracy": float(accuracy_score(y_true, y_pred)),
+        },
+        "best_val_accuracy": float(best_val),
+        "args": vars(args),
+    }
+    (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    print(json.dumps({k: v for k, v in metrics.items() if k != "args"}, indent=2, default=str))
 
-    log(f"\nTraining Complete. Best Validation Accuracy: {best_acc:.2f}%")
-    
-    # Save final model
-    torch.save(model.state_dict(), 'final_gender_model.pth')
-    log("Final model saved as final_gender_model.pth")
 
 if __name__ == "__main__":
-    try:
-        train_model()
-    except Exception as e:
-        log(f"FATAL ERROR: {e}")
-        import traceback
-        traceback.print_exc()
+    main()
